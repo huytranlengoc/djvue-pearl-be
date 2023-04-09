@@ -207,7 +207,7 @@ services:
 # Create a new app named `api`
 
 ```
-django-admin startapp api
+./manage.py startapp api
 ```
 
 Update `core/settings/base.py`:
@@ -261,3 +261,159 @@ class BaseModel(models.Model):
 ```
 
 * We add some common fields: `created_at`, `updated_at`, `created_by`, `updated_by` to track history of each record
+
+# Create User model to customize default AUTH_USER_MODEL
+
+Add `managers` folder to `api`:
+
+```
+mkdir -p api/managers
+echo "from .user import UserManager" > api/managers/__init__.py
+touch api/managers/user.py
+
+```
+
+Add the following content to `api/managers/user.py`:
+
+```
+from django.contrib.auth.base_user import BaseUserManager
+from django.utils.translation import gettext_lazy as _
+
+
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        """
+        Create and save a User with the given email and password.
+        """
+        if not email:
+            raise ValueError(_("The Email must be set"))
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save()
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """
+        Create and save a SuperUser with the given email and password.
+        """
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError(_("Superuser must have is_staff=True."))
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError(_("Superuser must have is_superuser=True."))
+
+        return self.create_user(email, password, **extra_fields)
+
+```
+
+Add `User` model:
+
+```
+echo "from .user import User" >> api/models/__init__.py
+touch api/models/user.py
+```
+
+Add the following content to `api/models/user.py`:
+
+```
+import uuid
+
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+from api.managers import UserManager
+
+
+class User(AbstractUser):
+    uuid = models.UUIDField(
+        primary_key=True, db_index=True, default=uuid.uuid4, unique=True, editable=False
+    )
+
+    username = None
+    email = models.EmailField(_("email address"), max_length=255, unique=True)
+    first_name = models.CharField(_("first name"), max_length=150)
+    last_name = models.CharField(_("last name"), max_length=150)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    class Meta:
+        db_table = "users"
+
+    def __str__(self):
+        return self.email
+
+```
+
+Add the followint contents to `core/settings/base.py`:
+
+```
+# Customize user model
+AUTH_USER_MODEL = "api.User"
+```
+
+From now, we can make migrations and migrate.
+
+```
+./manage.py makemigrations
+./manage.py migrate
+```
+
+Create a testcase by adding the following content to `api/tests.py`:
+
+```
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+
+
+class UsersManagersTests(TestCase):
+    def test_create_user(self):
+        User = get_user_model()
+        user = User.objects.create_user(email="normal@user.com", password="foo")
+        self.assertEqual(user.email, "normal@user.com")
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        try:
+            # username is None for the AbstractUser option
+            # username does not exist for the AbstractBaseUser option
+            self.assertIsNone(user.username)
+        except AttributeError:
+            pass
+        with self.assertRaises(TypeError):
+            User.objects.create_user()
+        with self.assertRaises(ValueError):
+            User.objects.create_user(email="")
+        with self.assertRaises(ValueError):
+            User.objects.create_user(email="", password="foo")
+
+    def test_create_superuser(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser("super@user.com", "foo")
+        self.assertEqual(admin_user.email, "super@user.com")
+        self.assertTrue(admin_user.is_active)
+        self.assertTrue(admin_user.is_staff)
+        self.assertTrue(admin_user.is_superuser)
+        try:
+            # username is None for the AbstractUser option
+            # username does not exist for the AbstractBaseUser option
+            self.assertIsNone(admin_user.username)
+        except AttributeError:
+            pass
+        with self.assertRaises(ValueError):
+            User.objects.create_superuser(
+                email="super@user.com", password="foo", is_superuser=False
+            )
+
+```
+
+At this point, we can run a simple test:
+
+```
+./manage.py test api
+```
