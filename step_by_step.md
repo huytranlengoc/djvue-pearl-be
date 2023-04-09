@@ -503,3 +503,53 @@ admin.site.register(User, CustomUserAdmin)
 admin.site.unregister(Group)
 
 ```
+
+# Authentication
+
+Add `djangorestframework-simplejwt` to pip
+
+```
+echo "djangorestframework-simplejwt==5.2.2" >> requirements/base.txt
+pip install -r requirements.txt
+```
+
+Update the following content to `core/settings/base.py`:
+
+```
+THIRD_PARTY_APPS = [
+    ...
+    "rest_framework_simplejwt",
+]
+
+# Configure for DRF
+REST_FRAMEWORK = {
+    ...
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+    ...
+}
+```
+
+Add new file `api/urls.py`:
+
+```
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from django.urls import path
+
+urlpatterns = [
+    path("token", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh", TokenRefreshView.as_view(), name="token_refresh"),
+
+]
+
+```
+
+Add the following content to `core/urls.py`:
+
+```
+from django.urls import path, include
+
+path('api/', include('api.urls')),
+
+```
