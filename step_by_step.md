@@ -78,6 +78,7 @@ DJANGO_APPS = [
 ]
 
 THIRD_PARTY_APPS = [
+    "rest_framework",
 ]
 
 LOCAL_APPS = [
@@ -86,7 +87,7 @@ LOCAL_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 ```
 
-# Prepare dependencies for pip
+# Split dependencies for pip
 
 ```
 mkdir -p requirements
@@ -203,3 +204,60 @@ services:
       - 8000:8000
       - 5678:5678
 ```
+# Create a new app named `api`
+
+```
+django-admin startapp api
+```
+
+Update `core/settings/base.py`:
+
+```
+LOCAL_APPS = [
+  "api",
+]
+```
+
+# Create a common model
+
+```
+mkdir -p api/models
+mv api/models.py api/models/base.py
+echo "from .base import BaseModel" >! api/models/__init__.py
+```
+
+Update `api/models/base.py`:
+
+```
+from django.conf import settings
+from django.db import models
+
+
+class BaseModel(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        default=None,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="%(class)s_created_by",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        default=None,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="%(class)s_updated_by",
+    )
+
+    class Meta:
+        abstract = True
+
+```
+
+* We add some common fields: `created_at`, `updated_at`, `created_by`, `updated_by` to track history of each record
