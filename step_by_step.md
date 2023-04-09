@@ -504,7 +504,7 @@ admin.site.unregister(Group)
 
 ```
 
-# Authentication
+# Add simple jwt
 
 Add `djangorestframework-simplejwt` to pip
 
@@ -553,3 +553,85 @@ from django.urls import path, include
 path('api/', include('api.urls')),
 
 ```
+
+# Add Register API
+
+Add User Serializer:
+
+```
+mkdir -p api/serializers
+touch api/serializers/__init__.py
+touch api/serializers/user.py
+echo "from .user import UserSerializer" >> api/serializers/__init__.py
+```
+
+Add the following content to `api/serializers/user.py`:
+
+```
+from rest_framework.serializers import ModelSerializer
+from api.models import User
+
+class UserSerializer(ModelSerializer):
+
+    class Meta:
+        model = User
+        fields = ['id', 'first_name', 'last_name', 'email', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
+
+        def create(self, validated_data):
+            password = validated_data.pop('password', None)
+            instance = self.Meta.model(**validated_data)
+            if password is not None:
+                instance.set_password(password)
+            instance.save()
+            return instance
+
+```
+
+Add Register api view:
+
+```
+mkdir -p api/views
+rm -f api/views.py
+touch api/views/__init__.py
+touch api/views/user.py
+echo "from .user import RegisterApiView" >> api/views/__init__.py
+```
+
+Add the following content to `api/views/user.py`:
+
+```
+from rest_framework import exceptions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from api.serializers import UserSerializer
+
+
+class RegisterApiView(APIView):
+    def post(self, request):
+        data = request.data
+        if data["password"] != data["password_confirm"]:
+            raise exceptions.APIException("Passwords must match")
+
+        serializer = UserSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+```
+
+Add register url to `api/urls.py`:
+
+```
+from .views import RegisterApiView
+
+urlpatterns = [
+    ...
+    path("register", RegisterApiView.as_view(), name="register"),
+    ...
+]
+```
+
+You can register new user by request to this api now, sample call:
+[Request to RegisterAPI](./docs/how_to_use_httpie.md#register-new-user)
