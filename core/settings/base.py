@@ -145,3 +145,7 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     )
 }
+
+# Configure for JWT
+JWT_AUTH_COOKIE = "refresh"
+JWT_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
