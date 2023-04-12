@@ -9,7 +9,7 @@ pip install httpie
 ### Login
 
 ```bash
-http POST :8000/api/token email=admin@example.com password=admin
+http POST :8000/api/login email=admin@example.com password=admin
 ```
 
 Sample response:
