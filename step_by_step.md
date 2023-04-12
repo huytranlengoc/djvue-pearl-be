@@ -207,7 +207,7 @@ services:
 # Create a new app named `api`
 
 ```
-django-admin startapp api
+./manage.py startapp api
 ```
 
 Update `core/settings/base.py`:
@@ -261,3 +261,482 @@ class BaseModel(models.Model):
 ```
 
 * We add some common fields: `created_at`, `updated_at`, `created_by`, `updated_by` to track history of each record
+
+# Create User model to customize default AUTH_USER_MODEL
+
+Add `managers` folder to `api`:
+
+```
+mkdir -p api/managers
+echo "from .user import UserManager" > api/managers/__init__.py
+touch api/managers/user.py
+
+```
+
+Add the following content to `api/managers/user.py`:
+
+```
+from django.contrib.auth.base_user import BaseUserManager
+from django.utils.translation import gettext_lazy as _
+
+
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        """
+        Create and save a User with the given email and password.
+        """
+        if not email:
+            raise ValueError(_("The Email must be set"))
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save()
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """
+        Create and save a SuperUser with the given email and password.
+        """
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError(_("Superuser must have is_staff=True."))
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError(_("Superuser must have is_superuser=True."))
+
+        return self.create_user(email, password, **extra_fields)
+
+```
+
+Add `User` model:
+
+```
+echo "from .user import User" >> api/models/__init__.py
+touch api/models/user.py
+```
+
+Add the following content to `api/models/user.py`:
+
+```
+import uuid
+
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+from api.managers import UserManager
+
+
+class User(AbstractUser):
+    uuid = models.UUIDField(
+        primary_key=True, db_index=True, default=uuid.uuid4, unique=True, editable=False
+    )
+
+    username = None
+    email = models.EmailField(_("email address"), max_length=255, unique=True)
+    first_name = models.CharField(_("first name"), max_length=150)
+    last_name = models.CharField(_("last name"), max_length=150)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    class Meta:
+        db_table = "users"
+
+    def __str__(self):
+        return self.email
+
+```
+
+Add the followint contents to `core/settings/base.py`:
+
+```
+# Customize user model
+AUTH_USER_MODEL = "api.User"
+```
+
+From now, we can make migrations and migrate.
+
+```
+./manage.py makemigrations
+./manage.py migrate
+```
+
+Create a testcase by adding the following content to `api/tests.py`:
+
+```
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+
+
+class UsersManagersTests(TestCase):
+    def test_create_user(self):
+        User = get_user_model()
+        user = User.objects.create_user(email="normal@user.com", password="foo")
+        self.assertEqual(user.email, "normal@user.com")
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        try:
+            # username is None for the AbstractUser option
+            # username does not exist for the AbstractBaseUser option
+            self.assertIsNone(user.username)
+        except AttributeError:
+            pass
+        with self.assertRaises(TypeError):
+            User.objects.create_user()
+        with self.assertRaises(ValueError):
+            User.objects.create_user(email="")
+        with self.assertRaises(ValueError):
+            User.objects.create_user(email="", password="foo")
+
+    def test_create_superuser(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser("super@user.com", "foo")
+        self.assertEqual(admin_user.email, "super@user.com")
+        self.assertTrue(admin_user.is_active)
+        self.assertTrue(admin_user.is_staff)
+        self.assertTrue(admin_user.is_superuser)
+        try:
+            # username is None for the AbstractUser option
+            # username does not exist for the AbstractBaseUser option
+            self.assertIsNone(admin_user.username)
+        except AttributeError:
+            pass
+        with self.assertRaises(ValueError):
+            User.objects.create_superuser(
+                email="super@user.com", password="foo", is_superuser=False
+            )
+
+```
+
+At this point, we can run a simple test:
+
+```
+./manage.py test api
+```
+
+# Add User to Admin Site
+
+Add new file `api/forms.py`:
+
+```
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
+
+from .models import User
+
+
+class CustomUserCreationForm(UserCreationForm):
+    class Meta(UserCreationForm):
+        model = User
+        fields = ("email", "first_name", "last_name")
+
+
+class CustomUserChangeForm(UserChangeForm):
+    class Meta:
+        model = User
+        fields = ("email", "first_name", "last_name")
+```
+
+Add the following contents to `apis/admin.py`:
+
+```
+from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.models import Group
+
+from .forms import CustomUserChangeForm, CustomUserCreationForm
+from .models import User
+
+
+class CustomUserAdmin(UserAdmin):
+    # The forms to add and change user instances
+    add_form = CustomUserCreationForm
+    form = CustomUserChangeForm
+
+    # when display the user model in the admin panel, the following fields are shown
+    list_display = ["email", "first_name", "last_name", "is_staff", "is_active"]
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "email",
+                    "first_name",
+                    "last_name",
+                )
+            },
+        ),
+        ("Permissions", {"fields": ("is_staff", "is_active")}),
+    )
+
+    # when creating a new user, the password fields are shown
+    add_fieldsets = (
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": (
+                    "email",
+                    "first_name",
+                    "last_name",
+                    "password1",
+                    "password2",
+                    "is_staff",
+                    "is_active",
+                ),
+            },
+        ),
+    )
+    search_fields = [
+        "email",
+        "first_name",
+        "last_name",
+    ]
+    ordering = ["email", "first_name", "last_name"]
+    filter_horizontal = []
+
+
+admin.site.register(User, CustomUserAdmin)
+admin.site.unregister(Group)
+
+```
+
+# Add simple jwt
+
+Add `djangorestframework-simplejwt` to pip
+
+```
+echo "djangorestframework-simplejwt==5.2.2" >> requirements/base.txt
+pip install -r requirements.txt
+```
+
+Update the following content to `core/settings/base.py`:
+
+```
+THIRD_PARTY_APPS = [
+    ...
+    "rest_framework_simplejwt",
+]
+
+# Configure for DRF
+REST_FRAMEWORK = {
+    ...
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+    ...
+}
+```
+
+Add configure JWT in `core/settings/base.py`:
+
+```
+# Configure for JWT
+JWT_AUTH_COOKIE = "refresh"
+JWT_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+```
+
+Add new file `api/views/auth.py`:
+
+```
+from django.conf import settings
+from rest_framework import serializers, status
+from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.views import (TokenObtainPairView,
+                                            TokenRefreshView)
+
+
+def set_refresh_cookie(response, refresh_token):
+    response.set_cookie(
+        key=settings.JWT_AUTH_COOKIE,
+        value=refresh_token,
+        httponly=True,
+        max_age=settings.JWT_AUTH_COOKIE_MAX_AGE,
+        samesite="None",
+        secure=True,
+    )
+
+
+class CookieTokenRefreshSerializer(TokenRefreshSerializer):
+    refresh = serializers.CharField(required=False)
+
+    def extract_refresh_token(self):
+        request = self.context["request"]
+        # Override token extraction to allow for refresh token in request body
+        if "refresh" in request.data and request.data["refresh"]:
+            return request.data["refresh"]
+        # Default with refresh token in HttpOnly cookie
+        cookie_name = settings.JWT_AUTH_COOKIE
+        if cookie_name and cookie_name in request.COOKIES:
+            return request.COOKIES[cookie_name]
+        else:
+            raise InvalidToken("No valid token found")
+
+    def validate(self, attrs):
+        # validates and isused to build a new JWT
+        refresh = self.token_class(self.extract_refresh_token())
+
+        data = {"access": str(refresh.access_token)}
+        refresh.set_jti()
+        refresh.set_exp()
+        refresh.set_iat()
+        data["refresh"] = str(refresh)
+        return data
+
+
+class CookieTokenRefreshView(TokenRefreshView):
+    serializer_class = CookieTokenRefreshSerializer
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        if response.status_code == status.HTTP_200_OK and "refresh" in response.data:
+            set_refresh_cookie(response, response.data["refresh"])
+            del response.data["refresh"]
+
+        return super().finalize_response(request, response, *args, **kwargs)
+
+
+class CookieTokenObtainPairView(TokenObtainPairView):
+    def finalize_response(self, request, response, *args, **kwargs):
+        if response.status_code == status.HTTP_200_OK and "refresh" in response.data:
+            set_refresh_cookie(response, response.data["refresh"])
+            del response.data["refresh"]
+
+        return super().finalize_response(request, response, *args, **kwargs)
+
+```
+Functions:
+* `set_refresh_cookie`: set refresh token to cookie
+* `CookieTokenRefreshSerializer`: override `validate` to get refresh token from request body or cookie
+    * `refresh`: set required to false, because it's optional
+    * `extract_refresh_token`: get refresh token from request body or cookie
+    * `validate`: validate refresh token and return new access token and refresh token (override from library)
+* `CookieTokenRefreshView` and `CookieTokenObtainPairView`:
+    * override `finalize_response` to set refresh token to HTTP Cookie
+    * delete refresh token from response
+
+Declare these 2 views in `api/views/__init__.py`:
+
+```
+from .auth import CookieTokenObtainPairView, CookieTokenRefreshView
+```
+
+Add new file `api/urls.py`:
+
+```
+from django.urls import path
+
+from api.views import CookieTokenObtainPairView, CookieTokenRefreshView
+
+
+urlpatterns = [
+    path("token", CookieTokenObtainPairView.as_view(), name="token"),
+    path("token/refresh", CookieTokenRefreshView.as_view(), name="refresh"),
+]
+
+```
+
+Add the following content to `core/urls.py`:
+
+```
+from django.urls import path, include
+
+path('api/', include('api.urls')),
+
+```
+
+You can know create a super user , then call to these 2 api to get access token and refresh token.
+
+```bash
+./manage.py createsuperuser
+```
+
+Example input: `admin@example.com` / `admin`
+
+Sample call:
+* [Request to access token](./docs/how_to_use_httpie.md#login)
+* [Request to refresh token](./docs/how_to_use_httpie.md#register-new-user)
+
+# Add Register API
+
+Add User Serializer:
+
+```
+mkdir -p api/serializers
+touch api/serializers/__init__.py
+touch api/serializers/user.py
+echo "from .user import UserSerializer" >> api/serializers/__init__.py
+```
+
+Add the following content to `api/serializers/user.py`:
+
+```
+from rest_framework.serializers import ModelSerializer
+from api.models import User
+
+class UserSerializer(ModelSerializer):
+
+    class Meta:
+        model = User
+        fields = ['id', 'first_name', 'last_name', 'email', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
+
+        def create(self, validated_data):
+            password = validated_data.pop('password', None)
+            instance = self.Meta.model(**validated_data)
+            if password is not None:
+                instance.set_password(password)
+            instance.save()
+            return instance
+
+```
+
+Add Register api view:
+
+```
+mkdir -p api/views
+rm -f api/views.py
+touch api/views/__init__.py
+touch api/views/user.py
+echo "from .user import RegisterApiView" >> api/views/__init__.py
+```
+
+Add the following content to `api/views/user.py`:
+
+```
+from rest_framework import exceptions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from api.serializers import UserSerializer
+
+
+class RegisterApiView(APIView):
+    def post(self, request):
+        data = request.data
+        if data["password"] != data["password_confirm"]:
+            raise exceptions.APIException("Passwords must match")
+
+        serializer = UserSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+```
+
+Add register url to `api/urls.py`:
+
+```
+from .views import RegisterApiView
+
+urlpatterns = [
+    ...
+    path("register", RegisterApiView.as_view(), name="register"),
+]
+```
+
+You can register new user by request to this api now, sample call:
+[Request to RegisterAPI](./docs/how_to_use_httpie.md#register-new-user)
