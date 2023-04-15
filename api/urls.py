@@ -1,11 +1,12 @@
 from django.urls import path
 
-from api.views import CookieTokenRefreshView
-
-from .views import LoginApiView, RegisterApiView
+from .views.auth import (CookieTokenLogoutView, CookieTokenObtainView,
+                         CookieTokenRefreshView)
+from .views.user import RegisterApiView
 
 urlpatterns = [
-    path("login", LoginApiView.as_view(), name="login"),
-    path("register", RegisterApiView.as_view(), name="register"),
-    path("refresh", CookieTokenRefreshView.as_view(), name="refresh"),
+    path("user/register", RegisterApiView.as_view(), name="register"),
+    path("auth/token", CookieTokenObtainView.as_view(), name="login"),
+    path("auth/refresh", CookieTokenRefreshView.as_view(), name="refresh"),
+    path("auth/logout", CookieTokenLogoutView.as_view(), name="login"),
 ]

@@ -1,3 +1,2 @@
-from .login import LoginSerializer
-from .refresh_token import CookieTokenRefreshSerializer
+from .auth import CookieTokenObtainSerializer, CookieTokenRefreshSerializer
 from .user import UserSerializer

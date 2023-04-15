@@ -417,42 +417,54 @@ THIRD_PARTY_APPS = [
 
 # Configure for DRF
 REST_FRAMEWORK = {
-    ...
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
-    ...
+    "DEFAULT_AUTHENTICATION_CLASSES": ("api.authentications.JWTCookieAuthentication",)
 }
-```
 
-Add configure JWT in `core/settings/base.py`:
-
-```
 # Configure for JWT
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+}
 JWT_AUTH_COOKIE = "refresh"
-JWT_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 ```
 
-Add new file `api/views/auth.py`:
+Add new file `api/serializers/auth.py`:
 
 ```
 from django.conf import settings
-from rest_framework import serializers, status
+from django.contrib.auth import authenticate
+from django.utils.translation import gettext_lazy as _
+from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
-from rest_framework_simplejwt.views import (TokenObtainPairView,
-                                            TokenRefreshView)
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 
 
-def set_refresh_cookie(response, refresh_token):
-    response.set_cookie(
-        key=settings.JWT_AUTH_COOKIE,
-        value=refresh_token,
-        httponly=True,
-        max_age=settings.JWT_AUTH_COOKIE_MAX_AGE,
-        samesite="None",
-        secure=True,
-    )
+class CookieTokenObtainSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField()
+
+    def validate(self, data):
+        email = data.get("email", "")
+        password = data.get("password", "")
+
+        if email and password:
+            user = authenticate(email=email, password=password)
+            # check valid credentials
+            if not user:
+                msg = _("Unable to log in with provided credentials.")
+                raise exceptions.ValidationError(msg)
+            # check user status
+            if not user.is_active:
+                msg = _("User account is disabled.")
+                raise exceptions.ValidationError(msg)
+            # valid user
+            data["user"] = user
+        else:
+            msg = _("Must include 'email' and 'password'.")
+            raise exceptions.ValidationError(msg)
+        return data
 
 
 class CookieTokenRefreshSerializer(TokenRefreshSerializer):
@@ -475,14 +487,69 @@ class CookieTokenRefreshSerializer(TokenRefreshSerializer):
         refresh = self.token_class(self.extract_refresh_token())
 
         data = {"access": str(refresh.access_token)}
-        refresh.set_jti()
-        refresh.set_exp()
-        refresh.set_iat()
+        if jwt_settings.ROTATE_REFRESH_TOKENS:
+            refresh.set_jti()
+            refresh.set_exp()
+            refresh.set_iat()
         data["refresh"] = str(refresh)
         return data
 
+```
+
+Add new file `api/views/auth.py`:
+
+```
+from django.utils.translation import gettext_lazy as _
+from rest_framework import status
+from rest_framework.generics import GenericAPIView
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView
+
+from api.authentications import set_refresh_cookie, unset_refresh_cookie
+from api.serializers import (CookieTokenObtainSerializer,
+                             CookieTokenRefreshSerializer)
+
+
+class CookieTokenObtainView(GenericAPIView):
+    """
+    Same as rest_framework_simplejwt.views.TokenObtainPairView but:
+        * set HttpOnly cookie to store refresh token
+        * remove `refresh` from response data.
+    """
+
+    permission_classes = (AllowAny,)
+    serializer_class = CookieTokenObtainSerializer
+
+    def post(self, request):
+        data = request.data
+
+        # validate credentials
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        # get user and generate token
+        user = serializer.validated_data["user"]
+        refresh = RefreshToken.for_user(user)
+
+        # set cookie and return response
+        response = Response()
+        response.data = {
+            "access": str(refresh.access_token),
+        }
+        set_refresh_cookie(response, str(refresh))
+        return response
+
 
 class CookieTokenRefreshView(TokenRefreshView):
+    """
+    Override from rest_framework_simplejwt.views.TokenRefreshView:
+        * set HttpOnly cookie to store refresh token
+        * remote `refresh` from response data.
+    """
+
     serializer_class = CookieTokenRefreshSerializer
 
     def finalize_response(self, request, response, *args, **kwargs):
@@ -493,42 +560,83 @@ class CookieTokenRefreshView(TokenRefreshView):
         return super().finalize_response(request, response, *args, **kwargs)
 
 
-class CookieTokenObtainPairView(TokenObtainPairView):
-    def finalize_response(self, request, response, *args, **kwargs):
-        if response.status_code == status.HTTP_200_OK and "refresh" in response.data:
-            set_refresh_cookie(response, response.data["refresh"])
-            del response.data["refresh"]
-
-        return super().finalize_response(request, response, *args, **kwargs)
+class CookieTokenLogoutView(APIView):
+    def post(self, request):
+        response = Response()
+        unset_refresh_cookie(response)
+        response.data = {
+            "detail": _("You have been successfully logged out."),
+        }
+        return response
 
 ```
+
+Add new file `api/authentications.py`
+
+```
+from django.conf import settings
+from django.utils import timezone
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
+
+
+def set_refresh_cookie(response, refresh_token):
+    cookie_name = settings.JWT_AUTH_COOKIE
+    token_expiration = timezone.now() + jwt_settings.REFRESH_TOKEN_LIFETIME
+    response.set_cookie(
+        cookie_name,
+        value=refresh_token,
+        expires=token_expiration,
+        httponly=True,
+        samesite="None",
+        secure=True,
+    )
+
+
+def unset_refresh_cookie(response):
+    response.delete_cookie(settings.JWT_AUTH_COOKIE)
+
+
+class JWTCookieAuthentication(JWTAuthentication):
+    def authenticate(self, request):
+        cookie_name = settings.JWT_AUTH_COOKIE
+        header = self.get_header(request)
+        if header is None:
+            raw_token = request.COOKIES.get(cookie_name)
+        else:
+            raw_token = self.get_raw_token(header)
+        if raw_token is None:
+            return None
+
+        validated_token = self.get_validated_token(raw_token)
+        return self.get_user(validated_token), validated_token
+
+```
+
 Functions:
-* `set_refresh_cookie`: set refresh token to cookie
 * `CookieTokenRefreshSerializer`: override `validate` to get refresh token from request body or cookie
     * `refresh`: set required to false, because it's optional
     * `extract_refresh_token`: get refresh token from request body or cookie
     * `validate`: validate refresh token and return new access token and refresh token (override from library)
-* `CookieTokenRefreshView` and `CookieTokenObtainPairView`:
+* `CookieTokenRefreshView`:
     * override `finalize_response` to set refresh token to HTTP Cookie
     * delete refresh token from response
-
-Declare these 2 views in `api/views/__init__.py`:
-
-```
-from .auth import CookieTokenObtainPairView, CookieTokenRefreshView
-```
+* `CookieTokenObtainView`:
+    * Customize login functions based on `rest_framework_simplejwt.views.TokenObtainPairView ` but do set cookie on response
+    * Use `RefreshToken.for_user()` to generate refresh token
 
 Add new file `api/urls.py`:
 
 ```
 from django.urls import path
 
-from api.views import CookieTokenObtainPairView, CookieTokenRefreshView
-
+from .views.auth import (CookieTokenLogoutView, CookieTokenObtainView,
+                         CookieTokenRefreshView)
 
 urlpatterns = [
-    path("token", CookieTokenObtainPairView.as_view(), name="token"),
-    path("token/refresh", CookieTokenRefreshView.as_view(), name="refresh"),
+    path("auth/token", CookieTokenObtainView.as_view(), name="login"),
+    path("auth/refresh", CookieTokenRefreshView.as_view(), name="refresh"),
+    path("auth/logout", CookieTokenLogoutView.as_view(), name="login"),
 ]
 
 ```

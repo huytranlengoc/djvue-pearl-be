@@ -1,8 +1,36 @@
 from django.conf import settings
-from rest_framework import serializers
+from django.contrib.auth import authenticate
+from django.utils.translation import gettext_lazy as _
+from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
+
+
+class CookieTokenObtainSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField()
+
+    def validate(self, data):
+        email = data.get("email", "")
+        password = data.get("password", "")
+
+        if email and password:
+            user = authenticate(email=email, password=password)
+            # check valid credentials
+            if not user:
+                msg = _("Unable to log in with provided credentials.")
+                raise exceptions.ValidationError(msg)
+            # check user status
+            if not user.is_active:
+                msg = _("User account is disabled.")
+                raise exceptions.ValidationError(msg)
+            # valid user
+            data["user"] = user
+        else:
+            msg = _("Must include 'email' and 'password'.")
+            raise exceptions.ValidationError(msg)
+        return data
 
 
 class CookieTokenRefreshSerializer(TokenRefreshSerializer):

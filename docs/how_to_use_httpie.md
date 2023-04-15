@@ -9,7 +9,7 @@ pip install httpie
 ### Login
 
 ```bash
-http POST :8000/api/login email=admin@example.com password=admin
+http POST :8000/api/auth/token email=admin@example.com password=admin
 ```
 
 Sample response:
@@ -31,7 +31,7 @@ X-Frame-Options: DENY
 ### Refresh token
 
 ```bash
-http POST :8000/api/token/refresh Cookie:refresh=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTY4MTIyMTAyMSwiaWF0IjoxNjgxMTM0NjIxLCJqdGkiOiIxYTE2NDBmMDI1MGY0MDFmODc1Yjk0YmZlOGQ0YjU3MSIsInVzZXJfaWQiOjF9._AeHLX5th18fdKTpewv6WV_REZ-6XIDOdC4euZrZriQ;
+http POST :8000/api/auth/refresh Cookie:refresh=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTY4MjE1ODIxMywiaWF0IjoxNjgxNTUzNDEzLCJqdGkiOiIzMDE5YmY4MWY1NWU0Y2YxODI0MGMyZGZjZGQwNmM1YyIsInVzZXJfaWQiOjF9.AgzXw9CWigu2-nsWMiMLUlk_hyL-6rVZE-Cf8NOlOGw
 ```
 
 Response sample:
@@ -52,7 +52,7 @@ X-Frame-Options: DENY
 ### Register new user:
 
 ```bash
-http POST :8000/api/register email=user1@example.com first_name=test last_name=user password=user1 password_confirm=user1
+http POST :8000/api/user/register email=user1@example.com first_name=test last_name=user password=user1 password_confirm=user1
 ```
 
 Sample response:
