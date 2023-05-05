@@ -439,6 +439,7 @@ from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 class CookieTokenObtainSerializer(serializers.Serializer):
@@ -460,7 +461,11 @@ class CookieTokenObtainSerializer(serializers.Serializer):
                 msg = _("User account is disabled.")
                 raise exceptions.ValidationError(msg)
             # valid user
-            data["user"] = user
+            refresh = RefreshToken.for_user(user)
+            data = dict(
+                refresh=str(refresh),
+                access=str(refresh.access_token),
+            )
         else:
             msg = _("Must include 'email' and 'password'.")
             raise exceptions.ValidationError(msg)
@@ -484,7 +489,7 @@ class CookieTokenRefreshSerializer(TokenRefreshSerializer):
 
     def validate(self, attrs):
         # validates and isused to build a new JWT
-        refresh = self.token_class(self.extract_refresh_token())
+        refresh = RefreshToken(self.extract_refresh_token())
 
         data = {"access": str(refresh.access_token)}
         if jwt_settings.ROTATE_REFRESH_TOKENS:
@@ -501,46 +506,30 @@ Add new file `api/views/auth.py`:
 ```
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
-from rest_framework.generics import GenericAPIView
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.views import (TokenObtainPairView,
+                                            TokenRefreshView)
 
 from api.authentications import set_refresh_cookie, unset_refresh_cookie
 from api.serializers import (CookieTokenObtainSerializer,
                              CookieTokenRefreshSerializer)
 
 
-class CookieTokenObtainView(GenericAPIView):
+class CookieTokenObtainView(TokenObtainPairView):
     """
     Same as rest_framework_simplejwt.views.TokenObtainPairView but:
         * set HttpOnly cookie to store refresh token
         * remove `refresh` from response data.
     """
 
-    permission_classes = (AllowAny,)
     serializer_class = CookieTokenObtainSerializer
 
-    def post(self, request):
-        data = request.data
-
-        # validate credentials
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-
-        # get user and generate token
-        user = serializer.validated_data["user"]
-        refresh = RefreshToken.for_user(user)
-
-        # set cookie and return response
-        response = Response()
-        response.data = {
-            "access": str(refresh.access_token),
-        }
-        set_refresh_cookie(response, str(refresh))
-        return response
+    def finalize_response(self, request, response, *args, **kwargs):
+        if response.status_code == status.HTTP_200_OK and "refresh" in response.data:
+            set_refresh_cookie(response, response.data["refresh"])
+            del response.data["refresh"]
+        return super().finalize_response(request, response, *args, **kwargs)
 
 
 class CookieTokenRefreshView(TokenRefreshView):
@@ -556,7 +545,6 @@ class CookieTokenRefreshView(TokenRefreshView):
         if response.status_code == status.HTTP_200_OK and "refresh" in response.data:
             set_refresh_cookie(response, response.data["refresh"])
             del response.data["refresh"]
-
         return super().finalize_response(request, response, *args, **kwargs)
 
 
@@ -578,6 +566,7 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 def set_refresh_cookie(response, refresh_token):
@@ -608,7 +597,9 @@ class JWTCookieAuthentication(JWTAuthentication):
         if raw_token is None:
             return None
 
-        validated_token = self.get_validated_token(raw_token)
+        # get token from refresh cookie
+        refresh = RefreshToken(raw_token)
+        validated_token = refresh.access_token
         return self.get_user(validated_token), validated_token
 
 ```
@@ -636,7 +627,7 @@ from .views.auth import (CookieTokenLogoutView, CookieTokenObtainView,
 urlpatterns = [
     path("auth/token", CookieTokenObtainView.as_view(), name="login"),
     path("auth/refresh", CookieTokenRefreshView.as_view(), name="refresh"),
-    path("auth/logout", CookieTokenLogoutView.as_view(), name="login"),
+    path("auth/logout", CookieTokenLogoutView.as_view(), name="logout"),
 ]
 
 ```

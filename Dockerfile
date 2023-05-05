@@ -10,9 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install pip requirements
-COPY requirements.txt .
 COPY requirements/ requirements/
-RUN python -m pip install -r requirements.txt
+RUN python -m pip install -r requirements/dev.txt
 
 WORKDIR /app
 COPY . /app

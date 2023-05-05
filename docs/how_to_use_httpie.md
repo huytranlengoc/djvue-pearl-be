@@ -28,10 +28,14 @@ X-Frame-Options: DENY
 
 ```
 
+    * after login, you can store token in bash variable:
+```bash
+refresh_cookie='refresh=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTY4MTIyMTAyMSwiaWF0IjoxNjgxMTM0NjIxLCJqdGkiOiIxYTE2NDBmMDI1MGY0MDFmODc1Yjk0YmZlOGQ0YjU3MSIsInVzZXJfaWQiOjF9._AeHLX5th18fdKTpewv6WV_REZ-6XIDOdC4euZrZriQ'
+```
 ### Refresh token
 
 ```bash
-http POST :8000/api/auth/refresh Cookie:refresh=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTY4MjE1ODIxMywiaWF0IjoxNjgxNTUzNDEzLCJqdGkiOiIzMDE5YmY4MWY1NWU0Y2YxODI0MGMyZGZjZGQwNmM1YyIsInVzZXJfaWQiOjF9.AgzXw9CWigu2-nsWMiMLUlk_hyL-6rVZE-Cf8NOlOGw
+http POST :8000/api/auth/refresh Cookie:$refresh_cookie
 ```
 
 Response sample:
@@ -63,5 +67,14 @@ Sample response:
     "id": 2,
     "last_name": "user1"
 }
+
+```
+
+### List new user
+
+```
+http GET :8000/api/users/list Cookie:$refresh_cookie
+
+http GET :8000/api/users/current Cookie:$refresh_cookie
 
 ```

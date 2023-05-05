@@ -19,8 +19,7 @@
 
 ### For Github
 
-- `GitHub.copilot`: GitHub Copilot
-- `GitHub.vscode-pull-request-github`: GitHub Pull Request
+- `Codeium.codeium`: Codeium Code GPT and Chat GP
 
 ### For Devops:
 
@@ -62,7 +61,8 @@
     "python.terminal.activateEnvInCurrentTerminal": true,
     "editor.insertSpaces": true,
     "editor.tabSize": 4,
-    "editor.detectIndentation": true
+    "editor.detectIndentation": true,
+    "codeium.enableSearch": true
 }
 
 ```

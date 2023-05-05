@@ -2,6 +2,7 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 def set_refresh_cookie(response, refresh_token):
@@ -32,5 +33,7 @@ class JWTCookieAuthentication(JWTAuthentication):
         if raw_token is None:
             return None
 
-        validated_token = self.get_validated_token(raw_token)
+        # get token from refresh cookie
+        refresh = RefreshToken(raw_token)
+        validated_token = refresh.access_token
         return self.get_user(validated_token), validated_token

@@ -5,6 +5,7 @@ from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 class CookieTokenObtainSerializer(serializers.Serializer):
@@ -26,7 +27,11 @@ class CookieTokenObtainSerializer(serializers.Serializer):
                 msg = _("User account is disabled.")
                 raise exceptions.ValidationError(msg)
             # valid user
-            data["user"] = user
+            refresh = RefreshToken.for_user(user)
+            data = dict(
+                refresh=str(refresh),
+                access=str(refresh.access_token),
+            )
         else:
             msg = _("Must include 'email' and 'password'.")
             raise exceptions.ValidationError(msg)
@@ -50,7 +55,7 @@ class CookieTokenRefreshSerializer(TokenRefreshSerializer):
 
     def validate(self, attrs):
         # validates and isused to build a new JWT
-        refresh = self.token_class(self.extract_refresh_token())
+        refresh = RefreshToken(self.extract_refresh_token())
 
         data = {"access": str(refresh.access_token)}
         if jwt_settings.ROTATE_REFRESH_TOKENS:
